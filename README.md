@@ -7,11 +7,11 @@
 此脚本采用三阶段架构，包括可选的质量保证（QA）校对阶段。三个阶段可以一次进行，或者按需要分开执行。分开执行时可以按需要使用不同 LLM 模型。
 
 \[原始 EPUB\] \+ \[绿站 glossary.txt\]  
-       ↓ 
+       ↓  
 阶段 1：术语扫描与实体提取 (Lore Scanning)     → 生成 \[final\_glossary.json\]  
-       ↓ 
+       ↓  
 阶段 2：上下文感知批量翻译 (Translation)       → 生成 \[\*\_zh.epub\]  
-       ↓ 
+       ↓  
 阶段 3：自动化质量保证校对 (Quality Assurance) → 生成 \[\*\_final.epub\]  
 
 ### **阶段 1：术语扫描与实体提取 (Lore Scanning)**
