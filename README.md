@@ -1,4 +1,4 @@
-# **EPUB 双阶段日文小说翻译器用户指南**
+# **EPUB 三阶段日文小说翻译器用户指南**
 
 这是一个专为日文轻小说设计的 EPUB 翻译工具。它支持通过 OpenAI 兼容的 API 后端（如 mlx\_lm.server、vLLM、llama.cpp、youssofal/mtplx 等）来进行上下文连贯的批量翻译，并且提供 Streamlit 网页图形界面（Web UI）。
 
