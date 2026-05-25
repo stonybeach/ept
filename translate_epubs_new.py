@@ -654,8 +654,8 @@ class TwoPassNovelTranslator:
                             "4. 如果段落 jp 和 zh 没有分别，或者 zh 有很多日文文字，请重新翻译。\n"
                             "5. 如果翻译结果中有英语，除了原文里面的英语专有名称以外，请重新翻译，例如把「such」改为「这种」。\n"
                             "6. 如果译文文法不对或语句不通顺，请修改成为通顺的语句。\n"
-                            "7. 如果译文已经通顺且没有违反上述各点，【绝对不要】进行修辞性或风格性的润色！不要过度修改！\n"
-                            "输出要求：若有错，回传 JSON {\"id\": \"修正后的中文\"}。若完全没错，【必须】回传空对象 {}。\n\n"
+                            "7. 如果译文已经通顺且没有违反上述各点，【绝对不要】进行修辞性或风格性的润色！不要过度修改！绝对不要包含任何解释或 Markdown 标签！\n"
+                            "输出要求：若有错，回传 JSON {\"id1\": \"修正后的中文1\",\"id2\": \"修正后的中文2\"}。若完全没错，【必须】回传空对象 {}。\n\n"
                             f"【术语表】: {json.dumps(self.global_glossary, ensure_ascii=False)}\n"
                         )
                         eval_payload = [{"id": str(p['index']), "jp": p['jp'], "zh": self.cc_back.convert(p['zh'])} for p in chunk]
@@ -665,7 +665,7 @@ class TwoPassNovelTranslator:
                         )
                         
                         corrections = self._ask_llm_json(system_prompt, user_prompt, max_tokens=self.max_tokens)
-                        if corrections:
+                        if corrections and isinstance(corrections,dict):
                             for idx_str, corrected_text in corrections.items():
                                 try:
                                     target_tag = tags[int(idx_str)]
