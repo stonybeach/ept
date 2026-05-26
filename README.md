@@ -147,6 +147,18 @@ Deepseek v4 后端使用示例：
 
 ./ds4-server --ctx 32768 --kv-disk-dir /tmp/ds4-kv --kv-disk-space-mb 16384 --port 8080
 
+### **示例 4**
+
+python translate_epubs_new.py --model models/Hy-MT2-30B-A3B-MLX-8bit --history 5 --temperature 0.7 --chunk-size 25
+
+* **运行分析**：  
+  * **\--model models/Hy-MT2-30B-A3B-MLX-8bit**：指定本地运行的腾讯混元 Hy-MT2 30B 模型。
+  * **\--temperature 0.7**：推荐使用 0.7。
+
+Hy-MT2 30B 后端使用示例：
+
+mlx_lm.server --model models/Hy-MT2-30B-A3B-MLX-8bit
+
 ## **4\. 启动图形操作界面**
 
 如果您不喜欢在终端中输入繁琐的参数，可以使用以下命令启动内置的 Web 控制面板：
