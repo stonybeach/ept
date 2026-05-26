@@ -117,6 +117,7 @@ python translate\_epubs\_new.py \--presence-penalty 1.5 \--model Youssofal/Qwen3
 
 * **运行分析**：  
   * **\--model Youssofal/Qwen3.6-27B-MTPLX-Optimized-Speed**：指定本地运行的 Qwen 3.6 27B 的 4-bit 量化版本。Qwen 3.6 模型在本地使用 MTPLX 以 Youssofal/Qwen3.6-27B-MTPLX-Optimized-Speed 为名字执行。
+  * **\--max-tokens 16384**：由于启用推理，token 量要高一点。
   * **\--presence-penalty 1.5**：使用 Qwen 3.6 如果不设置 1.5 的存在惩罚（Presence Penalty），有可能会出现模型持续输出不重复的新内容，进入无限复读循环。
 
 MTPLX 后端使用示例：
@@ -132,6 +133,19 @@ mtplx serve \
   --reasoning on \
   --reasoning-parser qwen3 \
   --no-stats-footer
+
+### **示例 3**
+
+python translate_epubs_new.py --max-tokens 16384 --model deepseek-reasoning --history 5 --temperature 0.5 --chunk-size 50
+
+* **运行分析**：  
+  * **\--model deepseek-reasoning**：指定本地运行的 deepseek 推理模型。
+  * **\--max-tokens 16384**：由于启用推理，token 量要高一点。
+  * **\--temperature 0.5**：推荐使用 0.5，如果太高会导致不遵守术语表，太低则输出格式不正确。
+
+Deepseek v4 后端使用示例：
+
+./ds4-server --ctx 32768 --kv-disk-dir /tmp/ds4-kv --kv-disk-space-mb 16384 --port 8080
 
 ## **4\. 启动图形操作界面**
 
