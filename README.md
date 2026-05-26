@@ -1,6 +1,6 @@
-# **EPUB 三阶段日文小说翻译器用户指南**
+# **EPUB 三段式日文小说翻译器用户指南**
 
-这是一个专为日文轻小说设计的 EPUB 翻译工具。它支持通过 OpenAI 兼容的 API 后端（如 mlx\_lm.server、vLLM、llama.cpp、youssofal/mtplx 等）来进行上下文连贯的批量翻译，并且提供 Streamlit 网页图形界面（Web UI）。
+这是一个专为日文轻小说设计的 EPUB 翻译工具。它支持通过 OpenAI 兼容的 API 后端（如 mlx\_lm.server、vLLM、llama.cpp、youssofal/mtplx 等）来进行上下文连贯的批量翻译，并且提供网页图形界面（Web UI）。
 
 ## **1\. 工作流程 (Workflow)**
 
@@ -97,7 +97,7 @@
 
 ## **3\. 使用实例 (Command Line Examples)**
 
-以下是两组典型的命令行调用范例以及它们背后参数的设计原理：
+以下是几组典型的命令行调用范例以及它们背后参数的设计原理。下载 translate\_epubs\_new.py 后，请在该目录下建立一个 novels 子目录，放入你想翻译的 EPUB 小说。另外，你需执行一个本地的大语言模型，或者登记一个模型 API。
 
 ### **示例 1**
 
