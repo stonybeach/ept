@@ -11,8 +11,9 @@ from bs4 import BeautifulSoup
 import logging
 import subprocess
 from datetime import datetime
+import time
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.basicConfig(level=logging.INFO, format='      %(message)s')
 
 class TwoPassNovelTranslator:
     """
@@ -29,7 +30,7 @@ class TwoPassNovelTranslator:
     - Configurable Multiple Quality Assurance (QA) passes
     """
     
-    def __init__(self, base_url="http://localhost:8080/v1", api_key="not-needed", model_name="default", dict_path=None, max_tokens=8192, verbose=False, attempts=2, history=25, presence_penalty=0.0, to_traditional=True, temperature=1.0, chapter_abbrev=False):
+    def __init__(self, base_url="http://localhost:8080/v1", api_key="not-needed", model_name="default", dict_path=None, max_tokens=8192, verbose=False, attempts=2, history=25, presence_penalty=0.0, to_traditional=True, temperature=1.0, chapter_abbrev=False, use_mini_glossary=False):
         self.cc = opencc.OpenCC('s2hk.json')
         self.cc_back = opencc.OpenCC('t2s.json')
         self.max_tokens = max_tokens
@@ -41,7 +42,8 @@ class TwoPassNovelTranslator:
         self.model_name = model_name
         self.temperature = temperature
         self.chapter_abbrev = chapter_abbrev 
-        
+        self.use_mini_glossary = use_mini_glossary
+
         print(f"[*] Connecting to OpenAI-compatible server at {base_url}")
         try:
             from openai import OpenAI
@@ -61,6 +63,25 @@ class TwoPassNovelTranslator:
         
         self.global_glossary = {}
         self.predefined_dict = self._load_dictionary(dict_path)
+
+    def _build_mini_glossary(self, jp_texts, chapter_abbrevs):
+        """Helper function to create a strict subset of the glossary for the current text chunk."""
+        if isinstance(jp_texts, str):
+            combined_text = jp_texts
+        else:
+            combined_text = "".join(jp_texts)
+            
+        active_full_names = set()
+        for abbrev, full_name in chapter_abbrevs.items():
+            if abbrev in combined_text:
+                active_full_names.add(full_name)
+                
+        mini_glossary = {}
+        for jp_name, data in self.global_glossary.items():
+            if jp_name in combined_text or jp_name in active_full_names:
+                mini_glossary[jp_name] = data
+                
+        return mini_glossary
 
     def _remove_think_tags(self, text):
         if '</think>' in text:
@@ -128,30 +149,88 @@ class TwoPassNovelTranslator:
         ]
         
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=messages,
-                max_tokens=max_tokens,
-                temperature=self.temperature,
-                presence_penalty=0.0 if is_json else self.presence_penalty,
-                top_p=0.95,
-                frequency_penalty=0.05,
-                extra_body={
-                    "min_p": 0.05
-                }
-            )
+            start_time = time.time()
             
-            content = response.choices[0].message.content
-            if content is None:
-                return ""
+            try:
+                # Attempt to stream the response to accurately measure TTFT (prefill) vs generation
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=self.temperature,
+                    presence_penalty=0.0 if is_json else self.presence_penalty,
+                    top_p=0.95,
+                    frequency_penalty=0.05,
+                    extra_body={"min_p": 0.05},
+                    stream=True,
+                    stream_options={"include_usage": True}
+                )
                 
-            if self.verbose:
-                print(f"\n[LLM Response]:\n{content}\n")
+                content = ""
+                first_token_time = None
+                usage = None
                 
-            return self._remove_think_tags(content)
-            
+                for chunk in response:
+                    if first_token_time is None:
+                        first_token_time = time.time()
+                        
+                    if chunk.choices and chunk.choices[0].delta.content:
+                        content += chunk.choices[0].delta.content
+                        
+                    if hasattr(chunk, 'usage') and chunk.usage:
+                        usage = chunk.usage
+                        
+                end_time = time.time()
+                
+                # Calculate metrics if usage data was provided by the server
+                if usage and first_token_time:
+                    prefill_time = first_token_time - start_time
+                    gen_time = end_time - first_token_time
+                    
+                    prompt_tokens = usage.prompt_tokens
+                    comp_tokens = usage.completion_tokens
+                    
+                    prefill_tps = prompt_tokens / prefill_time if prefill_time > 0 else 0
+                    gen_tps = comp_tokens / gen_time if gen_time > 0 else 0
+                    
+                    print(f"      [Metrics] Prefill: {prefill_tps:.1f} t/s ({prompt_tokens} tk) | Generation: {gen_tps:.1f} t/s ({comp_tokens} tk)")
+                
+                if self.verbose:
+                    print(f"\n      [LLM Response]:\n{content}\n")
+                    
+                return self._remove_think_tags(content)
+
+            except Exception as stream_err:
+                # Fallback to non-streaming if the backend doesn't support stream_options
+                print(f"      [-] Streaming with metrics failed. Falling back to standard request... ({stream_err})")
+                
+                start_time = time.time()
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=self.temperature,
+                    presence_penalty=0.0 if is_json else self.presence_penalty,
+                    top_p=0.95,
+                    frequency_penalty=0.05,
+                    extra_body={"min_p": 0.05}
+                )
+                
+                content = response.choices[0].message.content or ""
+                end_time = time.time()
+                
+                if hasattr(response, 'usage') and response.usage:
+                    total_time = end_time - start_time
+                    tps = response.usage.total_tokens / total_time if total_time > 0 else 0
+                    print(f"      [Metrics] Total Speed: {tps:.1f} t/s ({response.usage.total_tokens} tk in {total_time:.1f}s)")
+                
+                if self.verbose:
+                    print(f"\n      [LLM Response]:\n{content}\n")
+                    
+                return self._remove_think_tags(content)
+                
         except Exception as e:
-            print(f"    [!] API Communication Error: {e}")
+            print(f"      [!] API Communication Error: {e}")
             return ""
 
     def _extract_json(self, text):
@@ -188,12 +267,16 @@ class TwoPassNovelTranslator:
         for attempt in range(max_retries):
             response = self._ask_llm(system_prompt, user_prompt, max_tokens=max_tokens, is_json=True)
             try:
-                return self._extract_json(response)
+                j = self._extract_json(response)
+                if isinstance(j,dict):
+                    return j
+                else:
+                    print(f"      [!] JSON Error: not a dict. Retrying ({attempt + 1}/{max_retries})...")
             except ValueError as e:
-                print(f"    [!] JSON Error: {e}. Retrying ({attempt + 1}/{max_retries})...")
-                if attempt == max_retries - 1: 
-                    print(f"      Still receiving non-JSON output as followed: {response}")
-                    return {}
+                print(f"      [!] JSON Error: {e}. Retrying ({attempt + 1}/{max_retries})...")
+            if attempt == max_retries - 1: 
+                print(f"        Still receiving non-JSON output as followed: {response}")
+                return {}
 
     def _extract_text_with_ruby(self, tag):
         tag_html = etree.tostring(tag, encoding='unicode', method='html')
@@ -306,7 +389,7 @@ class TwoPassNovelTranslator:
                 if name in self.predefined_dict: 
                     data['zh_name'] = self.predefined_dict[name]
                 if name not in self.global_glossary:
-                    print(f"    [New Entity] {name} -> {data.get('zh_name')}")
+                    print(f"      [New Entity] {name} -> {data.get('zh_name')}")
                 self.global_glossary[name] = data
 
     def run_lore_pass(self, epub_files):
@@ -323,7 +406,7 @@ class TwoPassNovelTranslator:
                         content = zin.read(doc_path)
                         tree = self._parse_xml(content)
                     except Exception as e:
-                        print(f"    [!] XML Parse error, skipping: {e}")
+                        print(f"      [!] XML Parse error, skipping: {e}")
                         continue
                         
                     tags = tree.xpath('//*[local-name()="p" or local-name()="h1" or local-name()="h2" or local-name()="h3" or local-name()="h4"]')
@@ -345,7 +428,7 @@ class TwoPassNovelTranslator:
                     "gender": "未知",
                     "type": ""
                 }
-                print(f"    [Forced Entity] {jp_name} -> {zh_name} (from predefined dictionary)")
+                print(f"      [Forced Entity] {jp_name} -> {zh_name} (from predefined dictionary)")
 
         with open("final_glossary.json", "w", encoding="utf-8") as f:
             json.dump(self.global_glossary, f, ensure_ascii=False, indent=2)
@@ -373,6 +456,8 @@ class TwoPassNovelTranslator:
         return self._ask_llm_json(system_prompt, user_prompt)
 
     def translate_single_line(self, jp_text, chapter_abbrevs, history_context=""):
+        current_glossary = self._build_mini_glossary(jp_text, chapter_abbrevs) if self.use_mini_glossary else self.global_glossary
+        
         system_prompt = (
             "你是一位顶尖的轻小说翻译专家，能严格遵守以下要求将提供的日文翻译为轻小说风格的中文。\n"
             "要求：\n"
@@ -385,7 +470,7 @@ class TwoPassNovelTranslator:
             "7. 【超级重要】翻译结果中不准使用英语，除了原文里面的英语专有名称以外，必须把「such」改为「这种」。\n"
             "8. 翻译成中文后再和日文原文校对一次，确保原文的意思正确地表达。\n"
             "9. 【极度重要】直接输出纯中文翻译，绝对不要包含任何解释或 Markdown 标签。\n\n"
-            f"【全局术语表】: {json.dumps(self.global_glossary, ensure_ascii=False)}\n"
+            f"【术语表】: {json.dumps(current_glossary, ensure_ascii=False)}\n"
             f"【本章简称映射表】: {json.dumps(chapter_abbrevs, ensure_ascii=False)}\n"
             "请勿输出未经翻译的日文原文。\n"
         )
@@ -401,6 +486,8 @@ class TwoPassNovelTranslator:
         return res.strip()
 
     def translate_chunk(self, jp_texts, chapter_abbrevs, history_context=""):
+        current_glossary = self._build_mini_glossary(jp_texts, chapter_abbrevs) if self.use_mini_glossary else self.global_glossary
+        
         system_prompt = (
             "你是一位顶尖的轻小说翻译专家，能严格遵守以下要求将提供的多个日文段落逐一翻译为轻小说风格的中文。\n"
             "要求：\n"
@@ -414,7 +501,7 @@ class TwoPassNovelTranslator:
             "8. 翻译成中文后再和日文段落原文对比一次，确保原文的意思正确地表达。\n"
             "9. 【极度重要】不允许使用 JSON！使用指定的分隔符，输出纯文本。\n"
             "10. 返回的翻译段落数量在使用分隔符隔开后，必须与原文段落数量完全一致，绝对不要包含任何解释或 Markdown 标签。\n\n"
-            f"【全局术语表】: {json.dumps(self.global_glossary, ensure_ascii=False)}\n"
+            f"【术语表】: {json.dumps(current_glossary, ensure_ascii=False)}\n"
             f"【本章简称映射表】: {json.dumps(chapter_abbrevs, ensure_ascii=False)}\n"
             "请勿输出未经翻译的日文原文。\n"
         )
@@ -463,14 +550,14 @@ class TwoPassNovelTranslator:
                         break
                 
                 if failed_translation:
-                    print(f"    [!] Chunk translation failed: Detected an identical unchanged line in the output. Retrying...")
+                    print(f"      [!] Chunk translation failed: Detected an identical unchanged line in the output. Retrying...")
                     continue
                     
                 return out
             else:
-                print(f"    [!] Received chunk with wrong length: expected {len(jp_texts)}, got {len(out)}. Retrying with new delimiter...")
+                print(f"      [!] Received chunk with wrong length: expected {len(jp_texts)}, got {len(out)}. Retrying with new delimiter...")
                 
-        print(f"    [!] Chunk translation failed {self.attempts} times. Falling back to line-by-line translation.")
+        print(f"      [!] Chunk translation failed {self.attempts} times. Falling back to line-by-line translation.")
         
         fallback_translations = []
         dynamic_history = history_context.split('\n') if history_context else []
@@ -489,7 +576,7 @@ class TwoPassNovelTranslator:
         try:
             tree = self._parse_xml(content)
         except Exception as e:
-            print(f"    [!] Failed to parse TOC XML: {e}")
+            print(f"      [!] Failed to parse TOC XML: {e}")
             return content
             
         tags = tree.xpath('//*[local-name()="a" or local-name()="span" or local-name()="h1" or local-name()="h2" or local-name()="h3" or local-name()="text"]')
@@ -526,7 +613,7 @@ class TwoPassNovelTranslator:
                         content = zin.read(doc_path)
                         tree = self._parse_xml(content)
                     except Exception as e:
-                        print(f"    [!] Failed to parse document XML: {e}")
+                        print(f"      [!] Failed to parse document XML: {e}")
                         continue
                         
                     tags = tree.xpath('//*[local-name()="p" or local-name()="h1" or local-name()="h2" or local-name()="h3" or local-name()="h4"]')
@@ -665,7 +752,7 @@ class TwoPassNovelTranslator:
                         )
                         
                         corrections = self._ask_llm_json(system_prompt, user_prompt, max_tokens=self.max_tokens)
-                        if corrections and isinstance(corrections,dict):
+                        if corrections:
                             for idx_str, corrected_text in corrections.items():
                                 try:
                                     target_tag = tags[int(idx_str)]
@@ -819,6 +906,7 @@ def run_streamlit_ui():
             verbose = st.checkbox("详细日志", value=False)
             to_traditional = st.checkbox("繁体中文", value=True)
             chapter_abbrev = st.checkbox("扫描简称及昵称", value=False)
+            use_mini_glossary = st.checkbox("使用迷你术语表 (Mini Glossary)", value=False)
         with col4:
             glossary_only = st.checkbox("只生成术语表 (略过翻译)", value=False)
             add_glossary = st.checkbox("补充现有术语表", value=False)
@@ -849,7 +937,8 @@ def run_streamlit_ui():
             presence_penalty=presence_penalty,
             to_traditional=to_traditional,
             temperature=temperature,
-            chapter_abbrev=chapter_abbrev
+            chapter_abbrev=chapter_abbrev,
+            use_mini_glossary=use_mini_glossary
         )
         
         with st.spinner("Translating... check the terminal for real-time progress."):
@@ -877,7 +966,7 @@ def main(
     webui: int = typer.Option(0, help="Start a Web UI on the specified port (e.g., 8000). Set to 0 to run in CLI mode."),
     verbose: bool = typer.Option(False, help="Enable verbose output during generation"),
     chunk_size: int = typer.Option(12, help="The chunk size for translation"),
-    history: int = typer.Option(12, help="Number of previous translated sentences to send as history context"),
+    history: int = typer.Option(5, help="Number of previous translated sentences to send as history context"),
     max_tokens: int = typer.Option(8192, help="Maximum tokens to generate"),
     attempts: int = typer.Option(2, help="The number of attempts in translation_chunk when a pass fails"),
     temperature: float = typer.Option(1.0, help="Temperature for the model"),
@@ -887,6 +976,7 @@ def main(
     add_glossary: bool = typer.Option(False, help="Initialize global glossary from existing final_glossary.json before lore scanning"),
     final_glossary: bool = typer.Option(False, help="Initialize global glossary from existing final_glossary.json and skip lore scanning"),
     chapter_abbrev: bool = typer.Option(False, help="Run chapter abbreviation scanning"),
+    use_mini_glossary: bool = typer.Option(False, help="Extract and use a smaller subset of the glossary for each chunk"),
     qa_only: bool = typer.Option(False, help="Skip translation and strictly run QA passes on existing _zh.epub files"),
     qa_pass: int = typer.Option(0, help="Number of QA passes to run (Set to 0 to bypass)"),
     to_traditional: bool = typer.Option(True, help="Convert final translation output to Traditional Chinese before saving")
@@ -916,7 +1006,8 @@ def main(
         presence_penalty=presence_penalty,
         to_traditional=to_traditional,
         temperature=temperature,
-        chapter_abbrev=chapter_abbrev
+        chapter_abbrev=chapter_abbrev,
+        use_mini_glossary=use_mini_glossary
     )
     translator.start(novels, qa_passes=qa_pass, chunk_size=chunk_size, qa_only=qa_only, glossary_only=glossary_only, add_glossary=add_glossary, final_glossary=final_glossary)
 

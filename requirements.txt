@@ -1,0 +1,7 @@
+typer
+openai
+opencc
+lxml
+bs4
+streamlit
+watchdog
